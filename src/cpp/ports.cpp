@@ -42,7 +42,25 @@ void RtData::broadcast(const char *path, const char *args, ...)
 void RtData::broadcast(const char *msg)
 {reply(msg);};
 
-void metaiterator_advance(const char *&title, const char *&value)
+static void metaiterator_advance_title(const char *&title)
+{
+    if(!title || !*title) {
+        title = NULL;
+        return; 
+    }
+    //search for next parameter start
+    //aka "\0:" unless "\0\0" is seen
+    char prev = 0;
+    while(prev || (*title && *title != ':'))
+        prev = *title++;
+
+    if(!*title)
+        title = NULL;
+    else
+        ++title;
+}
+
+static void metaiterator_advance_value(const char *title, const char *&value)
 {
     if(!title || !*title) {
         value = NULL;
@@ -59,43 +77,83 @@ void metaiterator_advance(const char *&title, const char *&value)
         value++;
 }
 
-Port::MetaIterator::MetaIterator(const char *str)
-    :title(str), value(NULL)
+
+Port::Port(const char *name_, const char *metadata_, const Ports *ports_,
+            std::function<void(msg_t, RtData&)> cb_)
+    :name(name_), metadata(metadata_), ports(ports_),
+    cb(cb_), meta_idx(NULL)
 {
-    metaiterator_advance(title, value);
+    int positions = 0;
+    const char *title = metadata;
+    const char *value = 0;
+    while(title && *title) {
+        positions++;
+        metaiterator_advance_title(title);
+    }
+
+    if(positions) {
+        meta_idx = new const char*[2*positions];
+        positions = 0;
+        title = metadata;
+        while(title && *title) {
+            metaiterator_advance_title(title);
+            metaiterator_advance_value(title,value);
+            meta_idx[positions++] = title;
+            meta_idx[positions++] = value;
+        }
+        assert(meta_idx[positions-1] == 0);
+        assert(meta_idx[positions-2] == 0);
+    }
+
+}
+
+Port::Port(const Port &p)
+    :Port(p.name, p.metadata, p.ports, p.cb)
+{}
+
+Port::~Port(void)
+{
+    delete[] meta_idx;
+}
+
+Port::MetaIterator::MetaIterator(const char *str, const char **meta_idx_)
+    :title(str), value(NULL), meta_idx(meta_idx_)
+{
+    if(meta_idx) {
+        title = meta_idx[0];
+        value = meta_idx[1];
+    } else {
+        metaiterator_advance_title(title);
+        metaiterator_advance_value(title, value);
+    }
 }
 
 Port::MetaIterator& Port::MetaIterator::operator++(void)
 {
-    if(!title || !*title) {
-        title = NULL;
+    //don't advance when at the end
+    if(!title)
         return *this;
+    if(meta_idx) {
+        meta_idx += 2;
+        title = meta_idx[0];
+        value = meta_idx[1];
+    } else {
+        metaiterator_advance_title(title);
+        metaiterator_advance_value(title, value);
     }
-    //search for next parameter start
-    //aka "\0:" unless "\0\0" is seen
-    char prev = 0;
-    while(prev || (*title && *title != ':'))
-        prev = *title++;
-
-    if(!*title)
-        title = NULL;
-    else
-        ++title;
-
-    metaiterator_advance(title, value);
     return *this;
 }
 
-Port::MetaContainer::MetaContainer(const char *str_)
-:str_ptr(str_)
+Port::MetaContainer::MetaContainer(const char *str_, const char **meta_idx_)
+:str_ptr(str_), meta_idx(meta_idx_)
 {}
 
 Port::MetaIterator Port::MetaContainer::begin(void) const
 {
     if(str_ptr && *str_ptr == ':')
-        return Port::MetaIterator(str_ptr+1);
+        return Port::MetaIterator(str_ptr+1, meta_idx);
     else
-        return Port::MetaIterator(str_ptr);
+        return Port::MetaIterator(str_ptr, meta_idx);
 }
 
 Port::MetaIterator Port::MetaContainer::end(void) const
@@ -113,13 +171,13 @@ Port::MetaIterator Port::MetaContainer::find(const char *str) const
 
 size_t Port::MetaContainer::length(void) const
 {
-        if(!str_ptr || !*str_ptr)
-            return 0;
-        char prev = 0;
-        const char *itr = str_ptr;
-        while(prev || *itr)
-            prev = *itr++;
-        return 2+(itr-str_ptr);
+    if(!str_ptr || !*str_ptr)
+        return 0;
+    char prev = 0;
+    const char *itr = str_ptr;
+    while(prev || *itr)
+        prev = *itr++;
+    return 2+(itr-str_ptr);
 }
 
 const char *Port::MetaContainer::operator[](const char *str) const

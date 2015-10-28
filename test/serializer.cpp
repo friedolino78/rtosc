@@ -57,9 +57,17 @@ char bufferc[2048];
 size_t sizec;
 Object o;
 
+class RtDataTest:public RtData
+{
+    virtual void reply(const char *, const char *, ...){};
+    virtual void reply(const char *){};
+    virtual void broadcast(const char *, const char *, ...){};
+    virtual void broadcast(const char *){};
+};
+
 void run_test(void)
 {
-    RtData d;
+    RtDataTest d;
     char rtdatabuf[100];
 
     //Initialize Parameters
@@ -113,8 +121,15 @@ void run_test(void)
 
 int main(int, char**)
 {
-    for(int i=0; i<1000; ++i)
+    const int repeat = 1000;
+    const int t_on = clock(); // timer before calling func
+    for(int i=0; i<repeat; ++i)
         run_test();
+    const int t_off = clock(); // timer when func returns
+    
+    double seconds = (t_off - t_on) * 1.0 / CLOCKS_PER_SEC;
+    printf("RTOSC Serialize Performance: %f seconds for the test\n", seconds);
+    printf("RTOSC Serialize Performace:  %f ns per serialize\n", seconds*1e9/(repeat*3.0));
 
     return 0;
 }

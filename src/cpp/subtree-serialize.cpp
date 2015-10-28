@@ -51,6 +51,7 @@ class VarCapture : public RtData
         char buf[128];
         char location[128];
         char msg[128];
+        size_t capture_len;
         const char *dummy;
         bool success;
 
@@ -59,6 +60,7 @@ class VarCapture : public RtData
         {
             memset(buf, 0, sizeof(buf));
             memset(location, 0, sizeof(buf));
+            capture_len = 0;
             this->loc = location;
             success = false;
         }
@@ -87,6 +89,7 @@ class VarCapture : public RtData
             va_list va;
             va_start(va, args);
             size_t len = rtosc_vmessage(buf, 128, path, args, va);
+            capture_len = len;
             (void) len;
             assert(len != 0);
             success = true;
@@ -134,7 +137,7 @@ size_t subtree_serialize(char *buffer, size_t buffer_size,
             const char *buf = args->vv.capture(args->ports, args->v.loc+1, args->object);
             if(buf)
                 args->len = append_bundle(args->buffer, buf, args->buffer_size, args->len,
-                    rtosc_message_length(buf, 128));
+                    args->vv.capture_len);
             });
 
     return args.len;
@@ -145,7 +148,8 @@ void subtree_deserialize(char *buffer, size_t buffer_size,
 {
     d.obj = object;
     //simply replay all objects seen here
-    for(unsigned i=0; i<rtosc_bundle_elements(buffer, buffer_size); ++i) {
+    const unsigned bundle_elms = rtosc_bundle_elements(buffer, buffer_size);
+    for(unsigned i=0; i<bundle_elms; ++i) {
         const char *msg = rtosc_bundle_fetch(buffer, i);
         ports->dispatch(msg+1, d);
     }

@@ -64,6 +64,10 @@ struct RtData
  * Port in rtosc dispatching hierarchy
  */
 struct Port {
+    Port(const char *name, const char *metadata, const Ports *ports,
+            std::function<void(msg_t, RtData&)> cb);
+    Port(const Port &p);
+    ~Port(void);
     const char  *name;    //< Pattern for messages to match
     const char  *metadata;//< Statically accessable data about port
     const Ports *ports;   //< Pointer to further ports
@@ -72,7 +76,7 @@ struct Port {
     class MetaIterator
     {
         public:
-            MetaIterator(const char *str);
+            MetaIterator(const char *str, const char **meta_idx_=NULL);
 
             //A bit odd to return yourself, but it seems to work for this
             //context
@@ -84,12 +88,14 @@ struct Port {
 
             const char *title;
             const char *value;
+        private:
+            const char **meta_idx;
     };
 
     class MetaContainer
     {
         public:
-            MetaContainer(const char *str_);
+            MetaContainer(const char *str_, const char **meta_idx_=NULL);
 
             MetaIterator begin(void) const;
             MetaIterator end(void) const;
@@ -99,15 +105,18 @@ struct Port {
             const char *operator[](const char *str) const;
 
             const char *str_ptr;
+            const char **meta_idx;
     };
 
     MetaContainer meta(void) const
     {
         if(metadata && *metadata == ':')
-            return MetaContainer(metadata+1);
+            return MetaContainer(metadata+1, meta_idx);
         else
-            return MetaContainer(metadata);
+            return MetaContainer(metadata, meta_idx);
     }
+    private:
+        const char **meta_idx;
 };
 
 /**

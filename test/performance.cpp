@@ -112,15 +112,15 @@ int main()
     d.obj = d.loc = loc_buffer;
     d.matches = 0;
 
-    int repeats = 200000;
+    int repeats = 20000;
     int t_on = clock(); // timer before calling func
-    for(int j=0; j<200000; ++j) {
+    for(int j=0; j<repeats; ++j) {
         for(int i=0; i<20; ++i){
             port_table.dispatch(events[i], d);
         }
     }
     //printf("Matches: %d\n", d.matches);
-    assert(d.matches == 3600000);
+    assert(d.matches == 18*repeats);
     int t_off = clock(); // timer when func returns
 
     double seconds = (t_off - t_on) * 1.0 / CLOCKS_PER_SEC;
