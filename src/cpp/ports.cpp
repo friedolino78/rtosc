@@ -6,6 +6,33 @@
 #include <string>
 #include <stdexcept>
 
+/* Compatibility with non-clang compilers */
+#ifndef __has_feature
+# define __has_feature(x) 0
+#endif
+#ifndef __has_extension
+# define __has_extension __has_feature
+#endif
+
+#if defined(HAVE_CPP11_SUPPORT)
+# if HAVE_CPP11_SUPPORT
+#  define RTOSC_PROPER_CPP11_SUPPORT
+# endif
+#elif __cplusplus >= 201103L || (defined(__GNUC__) && defined(__GXX_EXPERIMENTAL_CXX0X__) && (__GNUC__ * 100 + __GNUC_MINOR__) >= 405) || __has_extension(cxx_noexcept)
+# define RTOSC_PROPER_CPP11_SUPPORT
+# if (defined(__GNUC__) && (__GNUC__ * 100 + __GNUC_MINOR__) < 407 && ! defined(__clang__)) || (defined(__clang__) && ! __has_extension(cxx_override_control))
+#  define override // gcc4.7+ only
+#  define final    // gcc4.7+ only
+# endif
+#endif
+
+#ifndef RTOSC_PROPER_CPP11_SUPPORT
+# define noexcept throw()
+# define override
+# define final
+# define nullptr NULL
+#endif
+
 using namespace rtosc;
 
 static inline void scat(char *dest, const char *src)
@@ -592,7 +619,7 @@ void Ports::dispatch(const char *m, rtosc::RtData &d, bool base_dispatch) const
 
 class CaptureDepValue : public RtData
 {
-    int dependent_value;
+    int dependent_value = -1;
 
     void reply(const char *msg) override {
         throw std::logic_error("not expected");
@@ -612,23 +639,77 @@ public:
     int value() const { return dependent_value; }
 };
 
-constexpr std::size_t tmp_buffer_size = 1024;
+template<std::size_t N = 1024>
+class fixed_str
+{
+    char _data[N] = {0};
+    std::size_t _length = 0;
+    std::size_t _offset = 0;
+
+    void append() {}
+    char* end() { return _data + _offset + _length; }
+
+public:
+    void operator+=(const char* rhs)
+    {
+        if(N - _offset - _length < strlen(rhs) + 1)
+         throw std::range_error("string too long for concatenation");
+        strncpy(end(), rhs, N - length());
+    }
+
+    void operator+=(const int& i)
+    {
+        if(N - _offset - _length < 16)
+         throw std::range_error("string too long for concatenation");
+        sprintf(end(), "%d", i);
+    }
+
+    template<class ...Args>
+    void append(const char* s1, Args... args) {
+        operator+=(s1);
+        append(args...);
+    }
+
+    void pad(std::size_t length, char _pad = 0) {
+        memset(_data + _offset + _length, _pad,
+               std::min(length, N - _offset - _length));
+        _length += length;
+        str()[_length] = 0;
+    }
+
+    void clear() { *_data = 0; _length = _offset = 0; }
+
+    template<class ...Args>
+    fixed_str(Args... args) { append(args...); }
+
+    const char* str() const { return _data + _offset; }
+    char* str() { return _data + _offset; }
+
+    void shrink_fwd(const char* dest)
+    {
+        std::size_t n = dest - str();
+        _offset += n;
+        _length -= n;
+    }
+
+    std::size_t length() const { return _length; }
+};
 
 // internal use only!
-int get_default_value_from_runtime(void* runtime,
+static int get_default_value_from_runtime(void* runtime,
                                    const Ports& ports,
-                                   char* dependent_port)
+                                   fixed_str<1024>& dependent_port)
 {
     CaptureDepValue d;
     d.obj = runtime;
 
     // append type
-    std::size_t pos = strlen(dependent_port);
-    memset(dependent_port + pos, 0, 4);
-    strcpy(dependent_port + pos + 4-pos%4, ";i");
+    dependent_port.pad(4-dependent_port.length()%4);
+    dependent_port += ",";
+    dependent_port.pad(3);
 
     /* dependent_port is actually a message now... */
-    ports.dispatch(dependent_port, d, true);
+    ports.dispatch(dependent_port.str(), d, true);
 
 //  printf("captured default dependent value %d\n", d.value());
     return d.value();
@@ -637,7 +718,7 @@ int get_default_value_from_runtime(void* runtime,
 const char* rtosc::get_default_value(const char* portname, const Ports& ports,
                               void* runtime, int recursive)
 {
-    char buffer[tmp_buffer_size];
+//    char buffer[tmp_buffer_size];
 
     if(recursive < 0)
         throw std::logic_error("double recursion in get_default_value()");
@@ -665,12 +746,9 @@ const char* rtosc::get_default_value(const char* portname, const Ports& ports,
     const char* dependent = metadata[dependent_annotation];
     if(dependent)
     {
-        char* dependent_port = buffer;
-        *dependent_port = 0;
-        strcat(dependent_port, portname);
-        strcat(dependent_port, "/../");
-        strcat(dependent_port, dependent);
-        dependent_port = Ports::collapsePath(dependent_port);
+        // buffer shall hold the dependent port
+        fixed_str<1024> buffer(portname, "/../", dependent);
+        buffer.shrink_fwd(Ports::collapsePath(buffer.str()));
 
         union {
             int val;
@@ -680,22 +758,21 @@ const char* rtosc::get_default_value(const char* portname, const Ports& ports,
         if(runtime)
             dep.val = get_default_value_from_runtime(runtime,
                                                      ports,
-                                                     dependent_port);
+                                                     buffer);
         else
-            dep.str = get_default_value(dependent_port, ports,
+            dep.str = get_default_value(buffer.str(), ports,
                                         runtime, recursive-1);
 
-        char* default_variant = buffer;
-        *default_variant = 0;
-        strcat(default_variant, default_annotation);
-        strcat(default_variant, " ");
+        // buffer shall hold the default variant
+        buffer.clear();
+        buffer.append(default_annotation, " ");
 
         if(runtime)
-            sprintf(default_variant + strlen(default_variant), "%d", dep.val);
+            buffer += dep.val;
         else
-            strcat(default_variant, dep.str);
+            buffer += dep.str;
 
-        const char* value_of_default_variant = metadata[default_variant];
+        const char* value_of_default_variant = metadata[buffer.str()];
         if(value_of_default_variant)
             return value_of_default_variant;
         else
@@ -704,7 +781,8 @@ const char* rtosc::get_default_value(const char* portname, const Ports& ports,
             // it is very likely an easy to overlook error in the metadata
             throw std::logic_error("get_default_value(): "
                                    "value depends on a variable which is "
-                                   "out of range of the port's values ");
+                                   "out of range of the port's default "
+                                   "values ");
             // TODO: this error should include portname and metadata
     }
 

@@ -78,6 +78,19 @@ int assert_non_null(const void *v, const char *testcase, int line)
     return err;
 }
 
+int assert_null(const void *v, const char *testcase, int line)
+{
+    test_counter++;
+    int err = (v != NULL);
+    if(err) {
+        printf("not ok %d - %s...\n", test_counter, testcase);
+        printf("# Expected NULL value, but observed Non-NULL instead (line %d)\n", line);
+        global_err++;
+    } else
+        printf("ok %d - %s...\n", test_counter, testcase);
+    return err;
+}
+
 int assert_f32_eq(float a, float b,const char *testcase, int line)
 {
     test_counter++;
@@ -199,7 +212,7 @@ int assert_flt_eq(float a, float b, const char *testcase, int line)
 
 int test_summary(void)
 {
-    printf("# %d test(s) failed out of %d (currently passing %f%% tests)\n",
+    printf("# %d test(s) failed out of %d (currently passing %.2f%% tests)\n",
             global_err, test_counter, 100.0-global_err*100./test_counter);
     return global_err ? EXIT_FAILURE : EXIT_SUCCESS;
 }
