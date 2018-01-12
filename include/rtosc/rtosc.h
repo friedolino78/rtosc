@@ -60,13 +60,6 @@ typedef struct
     int32_t       has_delta; //!< if not 0, the next argument is the delta
 } repeater_t;
 
-//! indicates that the next nothing_t::len blocks count as if nonexistant
-//! they might contain rubbish
-typedef struct
-{
-    int32_t len;
-} nothing_t;
-
 typedef union {
 // types that can be used in messages
     int32_t       i;   //i,c,r

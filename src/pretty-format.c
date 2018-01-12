@@ -46,13 +46,18 @@ static int asnprintf(char* str, size_t size, const char* format, ...)
 //! delta args (from ranges) seen as @p additional_for_delta args
 static int next_arg_offset(const rtosc_arg_val_t* cur)
 {
-    return (cur->type == 'a' || cur->type == ' ')
-           ? cur->val.a.len + 1
-           : (cur->type == '-')
-               ? 1                              /* range arg */
-                 + next_arg_offset(cur + 1)     /* start arg */
-                 + (int) cur->val.r.has_delta   /* delta arg */
-               : 1;
+    if(cur->type == '-') {
+        int after_start_arg_or_delta = 1 + next_arg_offset(cur + 1);
+        return after_start_arg_or_delta
+               + (cur->val.r.has_delta
+                  ? next_arg_offset(cur + after_start_arg_or_delta)
+                  : 0);
+    }
+    else {
+        return 1 + ((cur->type == 'a' || cur->type == ' ')
+                     ? cur->val.a.len
+                     : 0);
+    }
 }
 
 /**
@@ -131,9 +136,8 @@ const size_t range_min = 5;
 #define COUNT_UP_WRITE(c) { assert(bs); \
                             *buffer++ = c; --bs; ++wrt; ++*cols_used; }
 
-static int rtosc_print_range(const rtosc_arg_val_t* arg,
-                             char* buffer, size_t bs,
-                             const rtosc_print_options* opt, int* cols_used)
+static int print_range(const rtosc_arg_val_t* arg, char* buffer, size_t bs,
+                       const rtosc_print_options* opt, int* cols_used)
 {
     size_t wrt = 0;
     int start;
@@ -146,36 +150,41 @@ static int rtosc_print_range(const rtosc_arg_val_t* arg,
         {
             // delta or endless range (endless has no delta)
 
-            const rtosc_arg_val_t* first_arg = arg+1+!!val->r.has_delta;
-            int tmp = rtosc_print_arg_val(first_arg, buffer, bs,
-                                          opt, cols_used);
-            COUNT_UP(tmp);
-
-            if(val->r.has_delta)
-            {
-                rtosc_arg_val_t one, m_one;
-                rtosc_arg_val_from_int(  &one, first_arg->type,  1);
-                rtosc_arg_val_from_int(&m_one, first_arg->type, -1);
-                if(   !rtosc_arg_vals_eq_single(arg+1,   &one, NULL)
-                   && !rtosc_arg_vals_eq_single(arg+1, &m_one, NULL))
-                {
-                    asnprintf(buffer, bs, " ");
-                    COUNT_UP_COL(1);
-
-                    rtosc_arg_val_t second;
-                    rtosc_arg_val_range_arg(arg, 1, &second);
-                    tmp = rtosc_print_arg_val(&second, buffer, bs,
+            // TODO: integrate into for loop
+                const rtosc_arg_val_t* first_arg = arg+1+!!val->r.has_delta;
+                int tmp = rtosc_print_arg_val(first_arg, buffer, bs,
                                               opt, cols_used);
-                    COUNT_UP(tmp);
+                COUNT_UP(tmp);
+
+                if(val->r.num != 1)
+                {
+                    if(val->r.has_delta)
+                    {
+                        rtosc_arg_val_t one, m_one;
+                        rtosc_arg_val_from_int(  &one, first_arg->type,  1);
+                        rtosc_arg_val_from_int(&m_one, first_arg->type, -1);
+/*                        if(   !rtosc_arg_vals_eq_single(arg+1,   &one, NULL)
+                           && !rtosc_arg_vals_eq_single(arg+1, &m_one, NULL))
+                        {
+                            asnprintf(buffer, bs, " ");
+                            COUNT_UP_COL(1);
+
+                            rtosc_arg_val_t second;
+                            rtosc_arg_val_range_arg(arg, 1, &second);
+                            tmp = rtosc_print_arg_val(&second, buffer, bs,
+                                                      opt, cols_used);
+                            COUNT_UP(tmp);
+                        }*/
+                    }
+                    asnprintf(buffer, bs, " ...");
+                    COUNT_UP_COL(4);
                 }
-            }
 
-            asnprintf(buffer, bs, " ... ");
-            COUNT_UP_COL(5);
-
+/*
             // print only the last value
             // (or nothing if the range is infinite)
-            start = val->r.num - (!!val->r.num);
+            start = val->r.num - (!!val->r.num);*/
+            start = val->r.num;
         }
         else
         {
@@ -193,7 +202,7 @@ static int rtosc_print_range(const rtosc_arg_val_t* arg,
 
     }
     else {
-            start = 0; // print the whole range
+        start = 0; // print the whole range
     }
 
     // loop over all args of the range
@@ -239,8 +248,8 @@ static size_t incsize(const rtosc_arg_val_t* av) {
     return av->type == 'a' ? av->val.a.len + 1 : 1;
 }
 
-//! insert a range block at the arg at position arg
-//! arg and lhsarg may be the same pointer
+//! insert a range block at the arg at position @p arg
+//! @p arg and @p lhsarg may be the same pointer
 static void insert_arg_range(rtosc_arg_val_t* arg, int32_t num,
                              const rtosc_arg_val_t* lhsarg,
                              int has_delta, const rtosc_arg_val_t* delta,
@@ -289,8 +298,7 @@ static const char* numeric_range_convertible_types()
 //! @param arg_out array, output which must have the size of arg or more;
 //!        may be the same as arg
 //! @return The number of really skipped argument values
-static int32_t rtosc_convert_to_range(const rtosc_arg_val_t* const arg,
-                                      size_t size,
+static int32_t rtosc_convert_to_range(const rtosc_arg_val_t* arg, size_t size,
                                       rtosc_arg_val_t* arg_out,
                                       const rtosc_print_options* opt)
 {
@@ -319,9 +327,20 @@ static int32_t rtosc_convert_to_range(const rtosc_arg_val_t* const arg,
     }
     else return 0;
 
+    size_t first_arg_skipped = 0;
+    if(has_delta) {
+        if(arg != arg_out)
+        for(size_t i = 0; i < incsize(arg); ++i)
+            arg_out[i] = arg[i];
+        first_arg_skipped = incsize(arg);
+        arg += first_arg_skipped;
+        arg_out += first_arg_skipped; // TODO: inc in for loop
+    }
+
     {
         int go_on = 1;
         size_t next;
+
         for(skipped = incsize(arg); go_on; skipped = next, ++num_common)
         {
             next = skipped + incsize(arg+skipped);
@@ -338,14 +357,25 @@ static int32_t rtosc_convert_to_range(const rtosc_arg_val_t* const arg,
 
     if(num_common >= range_min)
     {
-        insert_arg_range(arg_out, num_common, arg, has_delta, &delta,
+        rtosc_arg_val_t* copy_from;
+        if(has_delta) // TODO: use variable for incsize(arg)
+        {
+            copy_from = arg /*+ incsize(arg)*/;
+        } // TODO: use ?:
+        else
+            copy_from = arg;
+
+        insert_arg_range(arg_out, num_common /*- has_delta*/, arg, has_delta,
+                         &delta,
                          false, false);
         const rtosc_arg_val_t* old_arg_out = arg_out;
         arg_out += 1 + has_delta;
         arg_out += incsize(arg);
         arg_out->type = ' ';
-        arg_out->val.a.len = skipped - (arg_out - old_arg_out) - 1;
-        return skipped;
+        // "- has_delta" : for args with delta,
+        // the last value must be stored separately
+        arg_out->val.a.len = skipped - (arg_out - old_arg_out) -1;
+        return skipped + first_arg_skipped;
     }
     else
         return 0;
@@ -363,6 +393,8 @@ size_t rtosc_print_arg_val(const rtosc_arg_val_t *arg,
 
     switch(arg->type)
     {
+        case ' ':
+            break;
         case 'T':
             assert(bs>4);
             strncpy(buffer, "true", bs);
@@ -573,7 +605,7 @@ size_t rtosc_print_arg_val(const rtosc_arg_val_t *arg,
 
                 size_t tmp = rtosc_print_arg_val(input, buffer, bs,
                                                  opt, cols_used);
-                i += conv ? conv : next_arg_offset(arg+i);
+                i += next_arg_offset(input);
                 COUNT_UP(tmp);
 
                 linebreak_check_after_write(cols_used, &wrt,
@@ -582,7 +614,8 @@ size_t rtosc_print_arg_val(const rtosc_arg_val_t *arg,
                                             opt->linelength);
 
                 last_sep = buffer;
-                COUNT_UP_WRITE(' ');
+                if(input->type != ' ')
+                    COUNT_UP_WRITE(' ');
             }
             else
                 COUNT_UP_WRITE(' ');
@@ -596,7 +629,7 @@ size_t rtosc_print_arg_val(const rtosc_arg_val_t *arg,
         }
         case '-':
         {
-            wrt += rtosc_print_range(arg, buffer, bs, opt, cols_used);
+            wrt += print_range(arg, buffer, bs, opt, cols_used);
             break;
         }
         default:
@@ -650,10 +683,10 @@ size_t rtosc_print_arg_vals(const rtosc_arg_val_t *args, size_t n,
                                     tmp, &args_written_this_line,
                                     opt->linelength);
 
-        size_t inc = conv ? conv : next_arg_offset(args);
+        size_t inc = next_arg_offset(input);
         i += inc;
         args += inc;
-        if(i<n)
+        if(i<n && input->type != ' ')
         {
             assert(sep_len < bs);
             last_sep = buffer;
@@ -942,8 +975,8 @@ int32_t delta_from_arg_vals(const rtosc_arg_val_t* llhsarg,
         rtosc_arg_val_to_int(&div, &res);
     }
     else
-        res = -1; // return 0 to say "infinite range"
-    return res + 1;
+        res = 0; // = "infinite range"
+    return res;
 }
 
 static int is_range_multiplier(const char* s)
@@ -1266,13 +1299,13 @@ const char* rtosc_skip_next_printed_arg(const char* src, int* skipped,
 
                 bool numeric_range  = strchr(numeric_range_types(), lhstype),
                      infinite_range = false;
-                const char* endsrc;
+                const char* endsrc = rhssrc; // TODO: move this?
                 if(*rhssrc == ']')
                 {
                     assert(inside_bundle);
                     // we're still not finished. find out if delta-less or not
                     *rhstype = lhstype;
-                    endsrc = rhssrc;
+//                    endsrc = rhssrc;
                     infinite_range = true;
                 }
                 else
@@ -1281,10 +1314,11 @@ const char* rtosc_skip_next_printed_arg(const char* src, int* skipped,
                     if(!numeric_range)
                         break;
 
-                    endsrc = rtosc_skip_next_printed_arg(rhssrc, &rhsskipped,
-                                                         rhstype, NULL, 0,
-                                                         inside_bundle);
-                    if(!endsrc)
+                    const char* ok =
+                        rtosc_skip_next_printed_arg(rhssrc, &rhsskipped,
+                                                    rhstype, NULL, 0,
+                                                    inside_bundle);
+                    if(!ok)
                         break;
 
                     rtosc_scan_arg_val(rhssrc, &rhsarg, 1, NULL, &zero, 0, 0);
@@ -1798,8 +1832,9 @@ size_t rtosc_scan_arg_val(const char* src,
 
         int infinite_range = (*src == ']');
 
+        // read rhs, but don't advance src yet
         if(!infinite_range)
-            src += rtosc_scan_arg_val(src, &rhs, 1, NULL, &zero, 0, 0);
+            /*src +=*/ rtosc_scan_arg_val(src, &rhs, 1, NULL, &zero, 0, 0);
 
         /*
             these shall be conforming to delta_from_arg_vals,

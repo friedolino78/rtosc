@@ -279,11 +279,11 @@ void ranges()
               "a simple downwards integer range", __LINE__, "-3 -4 -5");
     check_alt("3 ... 4", &uncompressed,
               "a very short range, uncompressed", __LINE__, "3 4");
-    check("3 ... 4", &simplefloats, "a very short range, compressed", __LINE__);
-    check_alt("2.00 1.40 ... -0.40 -1.00", &simplefloats,
-              "a simple float range", __LINE__,
-              "2.00 1.40 0.80 ... -0.40 -1.00"); // TODO: bug: input != output
-                                                 //       fix in later commit?
+    // this will be read, but won't print as a range
+    check_alt("3 ... 4", &simplefloats, "a very short range, compressed", __LINE__, "3 4");
+    check("2.00 1.40 ... -0.40 -1.00", &simplefloats,
+          "a simple float range", __LINE__);
+
     check_alt("'z' 'x' ... 'r'", &uncompressed,
               "a simple downward char range", __LINE__,
               "'z' 'x'\n"
@@ -341,16 +341,16 @@ void ranges()
     /*
         endless ranges
      */
-    check("[1 ... ]", NULL, "delta-less infinite range (1)", __LINE__);
-    check("[\"Next Effect\"S ... ]", NULL,
+    check("[1 ...]", NULL, "delta-less infinite range (1)", __LINE__);
+    check("[\"Next Effect\"S ...]", NULL,
           "delta-less infinite range (2)", __LINE__);
     check_alt("[false...]", NULL, "delta-less infinite range (3)", __LINE__,
-              "[false ... ]");
-    check("[1 0 0 ... ]", NULL, "delta-less infinite range (4)", __LINE__);
-    check("[0 1 ... ]", NULL, "infinite range with delta", __LINE__);
-    check("[true false false ... ]", NULL,
+              "[false ...]");
+    check("[1 0 0 ...]", NULL, "delta-less infinite range (4)", __LINE__);
+    check("[0 1 ...]", NULL, "infinite range with delta", __LINE__);
+    check("[true false false ...]", NULL,
           "endless range after \"true false false\"", __LINE__);
-    check("[[0 1] ... ]", NULL, "range of arrays", __LINE__);
+    check("[[0 1] ...]", NULL, "range of arrays", __LINE__);
 }
 
 // most tests here are reverse to those in ranges()
@@ -375,24 +375,24 @@ void scan_ranges()
     check_alt("1 2 3 4 5 6 7", NULL,
               "convert to simple upwards integer range", __LINE__,
               "1 ... 7");
-    check_alt("-3 -4 -5 -6 -7", NULL,
+    check_alt("-3 -4 -5 -6 -7 -8", NULL,
               "convert to simple downwards integer range", __LINE__,
-              "-3 ... -7");
-    check_alt("'z' 'x' 'v' 't' 'r'", NULL,
+              "-3 ... -8");
+    check_alt("'z' 'x' 'v' 't' 'r' 'p'", NULL,
               "convert to simple downward char range", __LINE__,
-              "'z' 'x' ... 'r'");
-    check_alt("[4 3 2 1 0]", NULL,
+              "'z' 'x' ... 'p'");
+    check_alt("[4 3 2 1 0 -1]", NULL,
               "convert to downward range in an array", __LINE__,
-              "[4 ... 0]");
+              "[4 ... -1]");
     check_alt("1 3 5 7 9 13 15 17 19 21", NULL,
               "convert to two almost subsequent ranges", __LINE__,
               "1 3 ... 9 13 15 ... 21");
-    check_alt("[ 1 2 3 4 5 ]", NULL,
+    check_alt("[ 1 2 3 4 5 6 ]", NULL,
               "convert to range with delta 1 in an array", __LINE__,
-              "[1 ... 5]");
-    check_alt("[5 4 3 2 1 0]", NULL,
+              "[1 ... 6]");
+    check_alt("[5 4 3 2 1 0 -1]", NULL,
               "convert to range with delta -1 in an array", __LINE__,
-              "[5 ... 0]");
+              "[5 ... -1]");
 
     /*
         without delta
@@ -638,8 +638,8 @@ int main()
     scan_and_print_single();
     scan_and_print_mulitple();
     arrays();
-    scan_ranges();
     ranges();
+    scan_ranges();
 
     messages();
 
